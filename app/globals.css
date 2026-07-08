@@ -77,6 +77,27 @@ main { width: min(1440px, calc(100% - 24px)); margin: 0 auto; padding: 16px 0 46
 .danger { color: var(--bad); }
 button:disabled { opacity: .6; cursor: not-allowed; }
 
+.form-actions, .row-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.form-actions .primary {
+  flex: 1;
+}
+
+.row-actions {
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+}
+
+.row-actions .ghost {
+  min-width: 42px;
+  padding: 10px;
+}
+
 .tabs {
   display: flex;
   gap: 10px;

@@ -29,6 +29,7 @@ import {
   Home,
   Import,
   LineChart,
+  Pencil,
   Plus,
   RefreshCcw,
   Save,
@@ -141,7 +142,17 @@ function SegmentedTabs({ active, onChange }: { active: string; onChange: (tab: s
   );
 }
 
-function TransactionForm({ onAdd }: { onAdd: (transaction: Transaction) => void }) {
+function TransactionForm({
+  onAdd,
+  editingTransaction,
+  onUpdate,
+  onCancelEdit
+}: {
+  onAdd: (transaction: Transaction) => void;
+  editingTransaction?: Transaction | null;
+  onUpdate?: (transaction: Transaction) => void;
+  onCancelEdit?: () => void;
+}) {
   const [scope, setScope] = useState<FinanceScope>("mei");
   const [kind, setKind] = useState<TransactionKind>("receita");
   const [form, setForm] = useState({
@@ -165,6 +176,26 @@ function TransactionForm({ onAdd }: { onAdd: (transaction: Transaction) => void 
           : categories.pessoalDespesa;
 
   useEffect(() => {
+    if (!editingTransaction) return;
+
+    setScope(editingTransaction.scope);
+    setKind(editingTransaction.kind);
+    setForm({
+      date: editingTransaction.date,
+      category: editingTransaction.category,
+      account: editingTransaction.account,
+      description: editingTransaction.description,
+      amount: editingTransaction.amount.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+      paymentStatus: editingTransaction.paymentStatus,
+      invoiceRelated: Boolean(editingTransaction.invoiceRelated),
+      notes: editingTransaction.notes || ""
+    });
+  }, [editingTransaction]);
+
+  useEffect(() => {
+    const stillEditingSameType = editingTransaction && editingTransaction.scope === scope && editingTransaction.kind === kind;
+    if (stillEditingSameType) return;
+
     setForm((prev) => ({
       ...prev,
       category: categoryOptions[0],
@@ -173,12 +204,28 @@ function TransactionForm({ onAdd }: { onAdd: (transaction: Transaction) => void 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scope, kind]);
 
+  function resetForm() {
+    setScope("mei");
+    setKind("receita");
+    setForm({
+      date: todayISO(),
+      category: "Serviços",
+      account: "Conta PJ",
+      description: "",
+      amount: "",
+      paymentStatus: "pago",
+      invoiceRelated: false,
+      notes: ""
+    });
+  }
+
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const amount = parseMoney(form.amount);
     if (!form.description.trim() || amount <= 0) return;
-    onAdd({
-      id: uid("tx"),
+
+    const transaction: Transaction = {
+      id: editingTransaction?.id || uid("tx"),
       date: form.date,
       scope,
       kind,
@@ -189,15 +236,23 @@ function TransactionForm({ onAdd }: { onAdd: (transaction: Transaction) => void 
       paymentStatus: form.paymentStatus,
       invoiceRelated: form.invoiceRelated,
       notes: form.notes
-    });
-    setForm((prev) => ({ ...prev, description: "", amount: "", notes: "" }));
+    };
+
+    if (editingTransaction) {
+      onUpdate?.(transaction);
+      onCancelEdit?.();
+    } else {
+      onAdd(transaction);
+    }
+
+    resetForm();
   }
 
   return (
     <form className="form-card" onSubmit={submit}>
       <div className="section-title compact">
-        <h2>Novo lançamento</h2>
-        <p>Registre receitas e despesas do MEI ou pessoais.</p>
+        <h2>{editingTransaction ? "Editar lançamento" : "Novo lançamento"}</h2>
+        <p>{editingTransaction ? "Altere os dados e salve a atualização." : "Registre receitas e despesas do MEI ou pessoais."}</p>
       </div>
 
       <div className="two-switches">
@@ -247,13 +302,40 @@ function TransactionForm({ onAdd }: { onAdd: (transaction: Transaction) => void 
         Observações
         <textarea value={form.notes} placeholder="Opcional" onChange={(e) => setForm({ ...form, notes: e.target.value })} />
       </label>
-      <button className="primary" type="submit"><Plus size={18} /> Adicionar</button>
+      <div className="form-actions">
+        {editingTransaction && (
+          <button
+            className="secondary"
+            type="button"
+            onClick={() => {
+              onCancelEdit?.();
+              resetForm();
+            }}
+          >
+            Cancelar
+          </button>
+        )}
+        <button className="primary" type="submit">
+          {editingTransaction ? <Save size={18} /> : <Plus size={18} />}
+          {editingTransaction ? "Salvar alteração" : "Adicionar"}
+        </button>
+      </div>
     </form>
   );
 }
 
-function TransactionTable({ transactions, onDelete }: { transactions: Transaction[]; onDelete: (id: string) => void }) {
+function TransactionTable({
+  transactions,
+  onEdit,
+  onDelete
+}: {
+  transactions: Transaction[];
+  onEdit?: (transaction: Transaction) => void;
+  onDelete?: (id: string) => void;
+}) {
   if (!transactions.length) return <EmptyState title="Nenhum lançamento" text="Adicione receitas e despesas para o dashboard ficar completo." />;
+
+  const showActions = Boolean(onEdit || onDelete);
 
   return (
     <div className="table-wrap">
@@ -266,7 +348,7 @@ function TransactionTable({ transactions, onDelete }: { transactions: Transactio
             <th>Categoria</th>
             <th>Status</th>
             <th>Valor</th>
-            <th></th>
+            {showActions && <th>Ações</th>}
           </tr>
         </thead>
         <tbody>
@@ -281,7 +363,22 @@ function TransactionTable({ transactions, onDelete }: { transactions: Transactio
               <td>{t.category}</td>
               <td><span className={`pill ${t.paymentStatus}`}>{t.paymentStatus}</span></td>
               <td className={t.kind === "receita" ? "positive" : "negative"}>{t.kind === "receita" ? "+" : "-"}{money(t.amount)}</td>
-              <td><button className="ghost danger" onClick={() => onDelete(t.id)} aria-label="Excluir"><Trash2 size={16} /></button></td>
+              {showActions && (
+                <td>
+                  <div className="row-actions">
+                    {onEdit && (
+                      <button className="ghost" onClick={() => onEdit(t)} aria-label="Editar lançamento" title="Editar lançamento">
+                        <Pencil size={16} />
+                      </button>
+                    )}
+                    {onDelete && (
+                      <button className="ghost danger" onClick={() => onDelete(t.id)} aria-label="Excluir lançamento" title="Excluir lançamento">
+                        <Trash2 size={16} />
+                      </button>
+                    )}
+                  </div>
+                </td>
+              )}
             </tr>
           ))}
         </tbody>
@@ -415,7 +512,7 @@ function MeiPanel({ data }: { data: AppData }) {
           <div><strong>{limitPercent}%</strong><span>{money(annualRevenue)} / {money(data.settings.meiAnnualLimit)}</span></div>
         </div>
       </div>
-      <TransactionTable transactions={meiTransactions} onDelete={() => undefined} />
+      <TransactionTable transactions={meiTransactions} />
     </div>
   );
 }
@@ -445,7 +542,7 @@ function PersonalPanel({ data }: { data: AppData }) {
           <div><strong>{goalPercent}%</strong><span>{money(saved)} guardado de {money(data.settings.emergencyFundGoal)}</span></div>
         </div>
       </div>
-      <TransactionTable transactions={personalTransactions} onDelete={() => undefined} />
+      <TransactionTable transactions={personalTransactions} />
     </div>
   );
 }
@@ -674,6 +771,7 @@ export default function Page() {
   const [data, setDataState] = useState<AppData>(defaultData);
   const [active, setActive] = useState("dashboard");
   const [filter, setFilter] = useState<"todos" | FinanceScope>("todos");
+  const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
 
   useEffect(() => {
     setDataState(loadData());
@@ -688,8 +786,17 @@ export default function Page() {
     setData({ ...data, transactions: [transaction, ...data.transactions] });
   }
 
+  function updateTransaction(transaction: Transaction) {
+    setData({
+      ...data,
+      transactions: data.transactions.map((t) => t.id === transaction.id ? transaction : t)
+    });
+    setEditingTransaction(null);
+  }
+
   function deleteTransaction(id: string) {
     setData({ ...data, transactions: data.transactions.filter((t) => t.id !== id) });
+    if (editingTransaction?.id === id) setEditingTransaction(null);
   }
 
   function addInvoice(invoice: InvoiceTask) {
@@ -735,7 +842,12 @@ export default function Page() {
 
       {active === "lancamentos" && (
         <div className="grid-with-form">
-          <TransactionForm onAdd={addTransaction} />
+          <TransactionForm
+            onAdd={addTransaction}
+            editingTransaction={editingTransaction}
+            onUpdate={updateTransaction}
+            onCancelEdit={() => setEditingTransaction(null)}
+          />
           <section className="panel">
             <div className="section-title compact"><h2>Lançamentos</h2><p>Filtre e acompanhe tudo que entrou e saiu.</p></div>
             <div className="filter-row">
@@ -743,7 +855,11 @@ export default function Page() {
               <button className={filter === "mei" ? "selected" : ""} onClick={() => setFilter("mei")}>MEI</button>
               <button className={filter === "pessoal" ? "selected" : ""} onClick={() => setFilter("pessoal")}>Pessoal</button>
             </div>
-            <TransactionTable transactions={shownTransactions} onDelete={deleteTransaction} />
+            <TransactionTable
+              transactions={shownTransactions}
+              onEdit={(transaction) => setEditingTransaction(transaction)}
+              onDelete={deleteTransaction}
+            />
           </section>
         </div>
       )}
